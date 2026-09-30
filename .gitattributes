@@ -1,0 +1,24 @@
+# Batch scripts must use CRLF: cmd.exe parses LF-only .bat files unreliably
+# (goto/call labels get misaligned; in practice it takes the wrong branch),
+# so CRLF is stored directly in the repository
+*.bat text eol=crlf
+
+# Shell scripts always use LF
+*.sh text eol=lf
+
+# Source and text files: normalized to LF in the repository, checked out per
+# platform (core.autocrlf)
+*.c text
+*.h text
+*.py text
+*.md text
+*.cmake text
+CMakeLists.txt text
+
+# Binary files: no conversion allowed
+*.png binary
+*.jpg binary
+*.ico binary
+*.exe binary
+*.a binary
+*.lib binary

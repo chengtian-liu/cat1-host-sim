@@ -1,0 +1,56 @@
+# CMake build directories
+build/
+build-dbg/
+
+# Output binaries and runtime artifacts
+out/
+out-dbg/
+*.exe
+*.dll
+
+# Object files and libraries
+*.o
+*.obj
+*.a
+*.lib
+
+# Linker map files
+*.map
+
+# Ninja build files (inside build dirs, but catch stray ones too)
+*.ninja
+.ninja_deps
+.ninja_log
+
+# CMake generated files (stray)
+CMakeCache.txt
+cmake_install.cmake
+CMakeFiles/
+
+# IDE / Editor
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Runtime logs and captures
+*.log
+*.pcap
+
+# Stray text artifacts in build dirs only (don't blanket-ignore *.txt:
+# it would silently drop tracked-worthy files like requirements.txt)
+build/*.txt
+build-dbg/*.txt
+out/*.txt
+out-dbg/*.txt
+
+# Python cache
+__pycache__/
+*.pyc
