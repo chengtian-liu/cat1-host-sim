@@ -1,4 +1,4 @@
-# sim-sdk-common -- common layer shared by the SDK family
+﻿# sim-sdk-common -- common layer shared by the SDK family
 #
 # This directory carries two build responsibilities:
 #
@@ -232,7 +232,7 @@ target_compile_definitions(xyat PUBLIC
     AT_MQTT_CMCC=0
     MQTT_SSL=1
     MQTT_TASK=0
-    MBEDTLS_CONFIG_FILE=<mbedtls_config_ssl.h>
+    MBEDTLS_CONFIG_FILE=<mbedtls_config_ssl2.h>
     MBEDTLS_ALLOW_PRIVATE_ACCESS=1
 )
 
@@ -256,9 +256,11 @@ target_include_directories(xymbed PUBLIC
     ${SDK_ROOT}/platform/application/fs/littlefs
     ${SDK_ROOT}/platform/application/common/inc
     ${SDK_ROOT}/platform/kernel/rtc/inc
+    ${SDK_ROOT}/platform/kernel/lowpower/inc
+    ${SDK_ROOT}/platform/kernel/lowpower/lpm/inc
 )
 target_compile_definitions(xymbed PUBLIC
-    MBEDTLS_CONFIG_FILE=<mbedtls_config_ssl.h>
+    MBEDTLS_CONFIG_FILE=<mbedtls_config_ssl2.h>
     MBEDTLS_ALLOW_PRIVATE_ACCESS=1
 )
 target_compile_options(xymbed PRIVATE -Wno-unused-parameter -fno-strict-aliasing)
@@ -477,6 +479,8 @@ target_include_directories(xynet PUBLIC
     ${SDK_ROOT}/platform/application/ppp/inc
     ${SDK_ROOT}/platform/application/common/inc
     ${SDK_ROOT}/platform/kernel/rtc/inc
+    ${SDK_ROOT}/platform/kernel/lowpower/inc
+    ${SDK_ROOT}/platform/kernel/lowpower/lpm/inc
     ${SDK_ROOT}/platform/kernel/usbx/ux_app/inc
     ${SDK_ROOT}/platform/application/ping/xy_ping/inc
     ${SDK_ROOT}/platform/application/socket/socketMgr/inc

@@ -36,6 +36,8 @@
 #include "sim_proxy.h"
 #include "sim_vps_net.h"
 
+#include "xy_rtc.h"
+
 /* ================================================================== */
 /* TCP receive window global                                           */
 /* Real device: platform/application/common/src/app_basic_config.c:102 */
@@ -326,6 +328,12 @@ E_API_RSLT API_Send_Data_2_PS(unsigned char ucCid, unsigned char ucRai,
 static softap_var_nv_t sim_var_nv;
 softap_var_nv_t *g_softap_var_nv = &sim_var_nv;
 
+void sim_var_nv_init(void)
+{
+    g_softap_var_nv->rtc_tick     = xy_get_rtc_tick();
+    g_softap_var_nv->wall_time_ms = xy_get_rtc_ms();
+}
+
 /* ================================================================== */
 /* APP basic config (real device: app_basic_config.c, FTL loads from   */
 /* flash)                                                              */
@@ -380,6 +388,15 @@ static app_basic_cfg_t sim_app_basic_cfg = {
 };
 app_basic_cfg_t *g_app_basic_cfg = &sim_app_basic_cfg;
 
+/* Nitz mode getter (real device: app_basic_config.c:263). That file is */
+/* not compiled on host (sleep_lock/carrier deps), but xy_walltime.c and */
+/* main_proxy.c (both in libxynet.a) reference the accessor, so it is   */
+/* provided here against the sim instance above                         */
+uint8_t getNitzModeCfg(void)
+{
+    return g_app_basic_cfg->nitz;
+}
+
 /* ================================================================== */
 /* PS test mode (real device: pdp_dial.c; 0=normal, 1=factory/         */
 /* comprehensive test)                                                 */
@@ -411,6 +428,9 @@ STUB_VOID1(data_call_status_cb_inner, uint32_t, arg)
 STUB_BOOL0(Is_WakeUp_By_Self)
 STUB_BOOL0(Is_WakeUp_By_Lpuart)
 void *p_Sleep_Recovry_URC_Hook = NULL;
+/* User sleep-wakeup recovery hook (real device: xy_sys_hook.c);       */
+/* main_proxy.c calls it when non-NULL; host keeps NULL                */
+void *p_user_sleep_recover_hook = NULL;
 
 /* ================================================================== */
 /* CID validity (real device: atc_ps_cmd/src/xy_ps_api.c:1375)         */

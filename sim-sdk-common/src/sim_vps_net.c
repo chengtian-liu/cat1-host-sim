@@ -79,9 +79,10 @@ typedef struct {
     bool    act;        /* CID 1 activated (wan_eth_activate + main_proxy already called) */
     uint8_t cid;        /* current default CID */
     char    apn[32];    /* APN recorded by CGDCONT */
+    int     cfun;       /* 0=minimum functionality (RF off, no network), 1=full */
 } sim_vps_net_t;
 
-static sim_vps_net_t s_net = { true, false, 1, SIM_APN_DEFAULT };
+static sim_vps_net_t s_net = { true, false, 1, SIM_APN_DEFAULT, 1 };
 
 /* ------------------------------------------------------------------ */
 /* Reply helper: real-device format "\r\n<info body>\r\n\r\nOK\r\n",   */
@@ -222,8 +223,10 @@ static void sim_pdp_deactivate(uint8_t cid)
     LOGI("VPSNET", "PDP deactivate cid=%u", (unsigned)cid);
 
     /* Complete deactivation via the main_proxy route: send PROXY_MSG_PS_PDP_DEACT;
-     * main_proxy receives it and calls wan_eth_deactivate(cid). */
-    send_msg_2_proxy(PROXY_MSG_PS_PDP_DEACT, &cid, sizeof(cid), osWaitForever, true);
+     * main_proxy receives it and calls wan_eth_deactivate(cid).
+     * isCopy=false + (void*)(uintptr_t)cid: msg.data stores cid value directly,
+     * same pattern as at_usb_netdev_ctl_async in the SDK. */
+    send_msg_2_proxy(PROXY_MSG_PS_PDP_DEACT, (void *)(uintptr_t)cid, 0, osWaitForever, false);
 
     if (s_net.cid == cid)
         s_net.act = false;
@@ -238,6 +241,10 @@ static void sim_pdp_deactivate(uint8_t cid)
 
 int sim_vps_net_auto_activate(void)
 {
+    if (s_net.cfun == 0) {
+        LOGW("VPSNET", "auto-dial skipped: CFUN=0 (min functionality)");
+        return -1;
+    }
     if (!s_net.attached) {
         LOGW("VPSNET", "auto-dial skipped: not attached");
         return -1;
@@ -256,6 +263,10 @@ int sim_vps_net_auto_activate(void)
 
 int sim_vps_activate_cid(uint8_t cid)
 {
+    if (s_net.cfun == 0) {
+        LOGW("VPSNET", "activate cid=%u refused: CFUN=0 (min functionality)", (unsigned)cid);
+        return -1;
+    }
     if (!s_net.attached) {
         LOGW("VPSNET", "activate cid=%u refused: not attached", (unsigned)cid);
         return -1;
@@ -306,14 +317,44 @@ int sim_vps_net_handle(const char *cmd, int ttyFd)
         }
     }
 
+    /* ---- Phone functionality (CFUN) ---- */
+    if (strcmp(cmd, "AT+CFUN?") == 0) {
+        vpsnet_reply(ttyFd, "\r\n+CFUN: %d\r\n\r\nOK\r\n", s_net.cfun);
+        goto handled;
+    }
+    if (strncmp(cmd, "AT+CFUN=", 8) == 0) {
+        int val = 0;
+        sscanf(cmd + 8, "%d", &val);
+        if (val == 0) {
+            if (s_net.act)
+                sim_pdp_deactivate(s_net.cid);
+            s_net.attached = false;
+            s_net.cfun = 0;
+            vpsnet_reply(ttyFd, "\r\nOK\r\n");
+        } else if (val == 1) {
+            s_net.cfun = 1;
+            s_net.attached = true;
+            sim_vps_net_auto_activate();
+            vpsnet_reply(ttyFd, "\r\nOK\r\n");
+        } else {
+            vpsnet_reply(ttyFd, "\r\nERROR\r\n");
+        }
+        goto handled;
+    }
+
     /* ---- PS attach ---- */
     if (strcmp(cmd, "AT+CGATT?") == 0) {
-        vpsnet_reply(ttyFd, "\r\n+CGATT: %d\r\n\r\nOK\r\n", s_net.attached ? 1 : 0);
+        int shown = (s_net.cfun != 0 && s_net.attached) ? 1 : 0;
+        vpsnet_reply(ttyFd, "\r\n+CGATT: %d\r\n\r\nOK\r\n", shown);
         goto handled;
     }
     if (strncmp(cmd, "AT+CGATT=", 9) == 0) {
-        s_net.attached = (cmd[9] != '0');
-        vpsnet_reply(ttyFd, "\r\nOK\r\n");
+        if (s_net.cfun == 0 && cmd[9] != '0') {
+            vpsnet_reply(ttyFd, "\r\n+CME ERROR: operation not allowed\r\n");
+        } else {
+            s_net.attached = (cmd[9] != '0');
+            vpsnet_reply(ttyFd, "\r\nOK\r\n");
+        }
         goto handled;
     }
 
@@ -391,8 +432,9 @@ int sim_vps_net_handle(const char *cmd, int ttyFd)
 
     /* ---- Address query ---- */
     if (strcmp(cmd, "AT+CGPADDR") == 0 || strncmp(cmd, "AT+CGPADDR=", 11) == 0) {
+        const char *addr = s_net.act ? sim_pdp_ip_str(ipbuf, sizeof(ipbuf)) : "0.0.0.0";
         vpsnet_reply(ttyFd, "\r\n+CGPADDR: %u,%s\r\n\r\nOK\r\n",
-                     (unsigned)s_net.cid, sim_pdp_ip_str(ipbuf, sizeof(ipbuf)));
+                     (unsigned)s_net.cid, addr);
         goto handled;
     }
     if (strcmp(cmd, "AT+CGCONTRDP?") == 0 || strncmp(cmd, "AT+CGCONTRDP=", 13) == 0) {

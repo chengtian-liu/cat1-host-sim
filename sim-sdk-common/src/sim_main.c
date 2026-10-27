@@ -363,6 +363,9 @@ int sim_main(int argc, char **argv)
         g_sim_target.factory_nv_init(g_softap_fac_nv);
     }
 
+    extern void sim_var_nv_init(void);
+    sim_var_nv_init();
+
     Sys_Assert(osKernelInitialize() == osOK);
     fprintf(stderr, "DIAG: osKernelInitialize OK\n");
     fflush(stderr);
