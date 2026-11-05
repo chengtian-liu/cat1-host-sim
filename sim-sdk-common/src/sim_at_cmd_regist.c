@@ -38,6 +38,7 @@
 #include "at_com.h"
 #include "at_utils.h"
 #include "xy_at_api.h"
+#include "app_basic_config.h"
 
 /* The following handlers are defined on the SDK side; at_XYACT_req is a local empty stub */
 extern int at_QIDNSCFG_req(char *at_buf, char **prsp_cmd); /* at_socket_default.c */
@@ -110,6 +111,88 @@ static int at_XYACT_req(char *at_buf, char **prsp_cmd)
     return AT_END;
 }
 
+/*
+ * at_NV_req -- trimmed NV command handler (host simulator edition)
+ *
+ * The real device's at_system_cmd.c:at_NV_req handles the full NV table
+ * (factory NV, RF, GPIO, sleep, DNS, version, etc.), all depending on
+ * hardware-specific symbols (HWREG, flash protection, RF HAL, power
+ * management).  Those symbols are meaningless on the host and would
+ * require 15+ stubs.
+ *
+ * This trimmed version handles only the PPPLOGIN item -- the one that
+ * matters for PPP dial-up authentication.  Other NV items fall through
+ * to the "compatibility" path and return OK without side effects (same
+ * behaviour as the real device's compatibility fallback for unknown
+ * params).
+ *
+ *   AT+NV=SET,PPPLOGIN,<auth>,<user>,<pwd>
+ *   auth: 0=none, 1=PAP, 2=CHAP, 3=PAP+CHAP
+ */
+static int at_NV_req(char *at_buf, char **prsp_cmd)
+{
+    (void)prsp_cmd;
+    int atHandle = get_current_ttyFd();
+
+    if (g_req_type == AT_CMD_REQ)
+    {
+        char cmd[10] = {0};
+        char param[20] = {0};
+
+        if (at_parse_param("%10s,", at_buf, cmd) != XY_OK)
+        {
+            atReply(atHandle, AT_RC_ERROR, AT_SUCCESS_CODE, NULL);
+            return AT_END;
+        }
+
+        if (!strcmp(cmd, "SET"))
+        {
+            if (at_parse_param(",%20s,", at_buf, param) != XY_OK)
+            {
+                atReply(atHandle, AT_RC_ERROR, AT_SUCCESS_CODE, NULL);
+                return AT_END;
+            }
+
+            if (!strcmp(param, "PPPLOGIN"))
+            {
+                int auth_type = 0;
+                char username[16] = {0};
+                char password[16] = {0};
+
+                if (at_parse_param(",,%d(0-3),%15s,%15s", at_buf,
+                                   &auth_type, username, password) != XY_OK)
+                {
+                    atReply(atHandle, AT_RC_ERROR, AT_SUCCESS_CODE, NULL);
+                    return AT_END;
+                }
+
+                g_app_basic_cfg->ppp_auth_type = (uint8_t)auth_type;
+                SAVE_APP_BASIC_CFG_PARAM(ppp_auth_type);
+                strncpy((char *)g_app_basic_cfg->ppp_username, username, 15);
+                SAVE_APP_BASIC_CFG_PARAM(ppp_username);
+                strncpy((char *)g_app_basic_cfg->ppp_password, password, 15);
+                SAVE_APP_BASIC_CFG_PARAM(ppp_password);
+
+                atReply(atHandle, AT_RC_OK, AT_SUCCESS_CODE, NULL);
+                return AT_END;
+            }
+            /* Other SET params (APP, APPSTR, GWIP, DNSIP, factory NV
+             * offset, old compatibility strings): return OK on the host
+             * without touching non-existent hardware. Same behaviour as
+             * the real device's compatibility fallback. */
+        }
+        else if (!strcmp(cmd, "GET"))
+        {
+            /* NV GET: PPPLOGIN is a write-only config item on the real
+             * device (no getter), all other items are hardware-specific.
+             * Return OK with empty result body. */
+        }
+    }
+
+    atReply(atHandle, AT_RC_OK, AT_SUCCESS_CODE, NULL);
+    return AT_END;
+}
+
 #include "at_cmd_regist_decl.h"
 
 struct at_serv_proc_e at_basic_req[] = {
@@ -146,6 +229,7 @@ struct at_serv_proc_e at_basic_req[] = {
      * not registered for now */
     {"+XYACT",      at_XYACT_req},
     {"+QNETDEVCTL", at_stub_ok},
+    {"+NV",         at_NV_req},
     {"+QIDNSCFG",   at_QIDNSCFG_req},
     {"+QIDNSGIP",   at_QIDNSGIP_req},
     {"+QIGETERROR", at_QIGETERROR_req},
