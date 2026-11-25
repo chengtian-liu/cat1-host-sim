@@ -23,9 +23,11 @@
 #include "lwip/dns.h"
 #include "lwip/tcp.h"
 #include "lwip/netif.h"
+#include "lwip/tcpip.h"
 #include "xy_system.h"
 #include "ps_external.h"
 #include "pdp_dial.h"
+#include "xy_atc_interface.h"
 #include "ps_netif_api.h"
 #include "xy_wan_api.h"
 #include "softap_nv.h"
@@ -573,6 +575,53 @@ int xy_activate_cid_QIACTEX(char cid, char ViewMode)
 
     return (sim_vps_activate_cid((uint8_t)real_cid) == 0) ? XY_OK : XY_ERR;
 }
+
+/* ================================================================== */
+/* PS event callback registration (real device: LtePs ATC_AP task      */
+/* atc_ps_main.c:294 -> AtcAp_registerPSEventCallback, appends to a     */
+/* linked list and dispatches when the CP sends a URC). Host: the only  */
+/* compiled registrar is ppp_server.c (D_XY_PS_REG_EVENT_GTPPPAUTH), so */
+/* a single slot is enough.                                             */
+/*                                                                      */
+/* Gated behind SIM_PPP_AUTH (default off): the PPP network-side auth    */
+/* (GTPPPAUTH) emulation is compiled out for products without it.        */
+/* ================================================================== */
+#if SIM_PPP_AUTH
+static xy_psEventCallback_t s_ps_event_cb = NULL;
+
+void xy_atc_registerPSEventCallback(unsigned long eventId, xy_psEventCallback_t callback)
+{
+    if (eventId & D_XY_PS_REG_EVENT_GTPPPAUTH)
+        s_ps_event_cb = callback;
+}
+
+static void sim_ps_gtpppauth_timeout(void *arg)
+{
+    ATC_MSG_GTPPPAUTH_IND_STRU ind = { 0 };
+
+    (void)arg;
+    ind.ucResult = 1;   /* 1=SUCCESS, 0=FAIL */
+
+    if (s_ps_event_cb != NULL)
+        s_ps_event_cb(D_XY_PS_REG_EVENT_GTPPPAUTH, &ind, sizeof(ind));
+}
+
+int xy_activate_cid_with_auth(char cid, char auth_prot, char *username,
+                              unsigned char *pw_or_resp, unsigned char *challenge)
+{
+    /* pw_or_resp / challenge are length-prefixed buffers: [0] = length,
+     * [1..] = data bytes.  PAP passes challenge == NULL. */
+    LOGI("SIMNET", "activate_cid_with_auth cid=%d auth=%d user=%s pwlen=%d challen=%d",
+         (int)cid, (int)auth_prot,
+         username ? username : "",
+         pw_or_resp ? (int)pw_or_resp[0] : -1,
+         challenge ? (int)challenge[0] : -1);
+
+    tcpip_timeout(1000, sim_ps_gtpppauth_timeout, NULL);
+
+    return XY_OK;
+}
+#endif /* SIM_PPP_AUTH */
 
 /* ================================================================== */
 /* PPP / ppp_dl_malloc / ppp_ref_pbuf_free_custom / ppp_ref_pbuf_free_custom2

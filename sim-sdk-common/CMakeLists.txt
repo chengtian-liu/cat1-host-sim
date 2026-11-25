@@ -47,6 +47,7 @@ set(ENABLE_AT_SSL_QUEC 1)
 set(ENABLE_AT_HTTP_QUEC 1)
 set(ENABLE_AT_FTP_QUEC 1)
 set(ENABLE_AT_MQTT_QUEC 1)
+set(ENABLE_SIM_PPP_AUTH 0)
 
 # ---------------------------------------------------------------------------
 # xyos -- real OS layer (SDK original FreeRTOS + cmsis_os2/osal + host stubs)
@@ -218,6 +219,7 @@ target_compile_definitions(xyat PUBLIC
     TCP_WND_OPTIMIZE=0
     DNS_RELAY=0
     XY_PPP=1
+    SIM_PPP_AUTH=${ENABLE_SIM_PPP_AUTH}
     CONFIG_RADVD=1
     DHCP6_SERVER=1
     AT_FS_QUEC=${ENABLE_AT_FS_QUEC}
