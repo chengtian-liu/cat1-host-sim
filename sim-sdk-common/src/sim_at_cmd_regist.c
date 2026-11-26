@@ -34,10 +34,16 @@
  * at_cmd_regist.c exactly.
  */
 
+#include <stdio.h>
 #include "at_ctl.h"
 #include "at_com.h"
 #include "at_utils.h"
 #include "xy_at_api.h"
+#include "pdp_dial.h"
+#include "xy_wan_api.h"
+#include "softap_nv.h"
+#include "oss_nv.h"
+#include "pkt_process.h"
 #include "app_basic_config.h"
 
 /* The following handlers are defined on the SDK side; at_XYACT_req is a local empty stub */
@@ -45,6 +51,17 @@ extern int at_QIDNSCFG_req(char *at_buf, char **prsp_cmd); /* at_socket_default.
 extern int at_QIDNSGIP_req(char *at_buf, char **prsp_cmd); /* at_socket_default.c */
 extern int at_QIGETERROR_req(char *at_buf, char **prsp_cmd);/* at_socket_default.c */
 extern int at_QNTP_req(char *at_buf, char **prsp_cmd);     /* at_socket_default.c */
+
+/* Symbols required by the native +QNETDEVCTL handler
+ *   g_softap_fac_nv       -> sim_factory_nv.c (RAM-backed factory NV)
+ *   xy_get_cid_vaild      -> sim_net_shims.c
+ *   xy_activate_cid       -> sim_net_shims.c
+ *   at_usb_netdev_ctl_async -> main_proxy.c (SDK, compiled into xynet)
+ */
+extern softap_fac_nv_t *g_softap_fac_nv;
+extern bool xy_get_cid_vaild(unsigned char cid);
+extern int xy_activate_cid(char cid, char mipcallflg);
+extern int at_usb_netdev_ctl_async(uint8_t cid, uint8_t type);
 
 /*
  * Shared stub: all basic commands that "reply OK on receipt" share one
@@ -108,6 +125,118 @@ static int at_XYACT_req(char *at_buf, char **prsp_cmd)
     (void)prsp_cmd;
     int atHandle = get_current_ttyFd();
     atReply(atHandle, AT_RC_OK, AT_SUCCESS_CODE, NULL);
+    return AT_END;
+}
+
+/*
+ * at_QNETDEVCTL_req -- USB network-card dial-up control
+ *
+ * Mirrors the SDK's at_quec_basic_cmd.c:at_QNETDEVCTL_req. type=1 connects
+ * the USB netdev (gwnetif) immediately for the given already-activated CID;
+ * type=3 auto-activates and persists across restart; type=0 disconnects.
+ * The real activation path is at_usb_netdev_ctl_async -> main_proxy ->
+ * usbNetdevCtl -> fastProcNetInfoUpdateByLanIf -> gwEthIp4Activate ->
+ * gwEthLinkCallback -> usb_gw_process_active (link up, DHCP server answers
+ * the host TAP side).
+ */
+static int at_QNETDEVCTL_req(char *at_buf, char **prsp_cmd)
+{
+    (void)prsp_cmd;
+    int atHandle = get_current_ttyFd();
+
+    if (g_req_type == AT_CMD_REQ)
+    {
+        int cid = -1, type = -1, urc_en = 0;
+        int old_net_cid = g_app_basic_cfg->usb_cid;
+
+        if (at_parse_param("%d(0|1|3),%d(),%d[0-1]", at_buf, &type, &cid, &urc_en) != XY_OK ||
+            !xy_get_cid_vaild((unsigned char)cid))
+        {
+            atReply(atHandle, AT_RC_CME_ERROR, CME_ERR_INVALID_PARAM, NULL);
+            return AT_END;
+        }
+
+        if (type == 3) /* auto-activate CID and network, persists after restart */
+        {
+            g_softap_fac_nv->gw_act_mode = 1;
+            g_app_basic_cfg->usb_cid = cid;
+            g_app_basic_cfg->usbnet_sta_urc = urc_en;
+            SAVE_FAC_PARAM(gw_act_mode);
+            SAVE_APP_BASIC_CFG_PARAM(usb_cid);
+            SAVE_APP_BASIC_CFG_PARAM(usbnet_sta_urc);
+            if (!xy_Wan_is_ok((uint8_t)cid))
+            {
+                xy_activate_cid((char)cid, 0);
+            }
+        }
+        else if (type == 0) /* deactivate CID */
+        {
+            if (old_net_cid == INVAILD_CID_FLAG || cid != old_net_cid)
+            {
+                atReply(atHandle, AT_RC_CME_ERROR, CME_ERR_INVALID_PARAM, NULL);
+                return AT_END;
+            }
+            g_softap_fac_nv->gw_act_mode = 0;
+            g_app_basic_cfg->usb_cid = INVAILD_CID_FLAG;
+            g_app_basic_cfg->usbnet_sta_urc = 0;
+            SAVE_FAC_PARAM(gw_act_mode);
+            SAVE_APP_BASIC_CFG_PARAM(usb_cid);
+            SAVE_APP_BASIC_CFG_PARAM(usbnet_sta_urc);
+        }
+        else /* type=1: connect once immediately, config not persisted */
+        {
+            g_softap_fac_nv->gw_act_mode = 0;
+            g_app_basic_cfg->usb_cid = INVAILD_CID_FLAG;
+            g_app_basic_cfg->usbnet_sta_urc = 0;
+            SAVE_FAC_PARAM(gw_act_mode);
+            SAVE_APP_BASIC_CFG_PARAM(usb_cid);
+            SAVE_APP_BASIC_CFG_PARAM(usbnet_sta_urc);
+            if (!xy_Wan_is_ok((uint8_t)cid))
+            {
+                atReply(atHandle, AT_RC_CME_ERROR, CME_ERR_NO_NETWORK, NULL);
+                return AT_END;
+            }
+            g_app_basic_cfg->usb_cid = cid;
+            g_app_basic_cfg->usbnet_sta_urc = urc_en;
+        }
+
+        if (at_usb_netdev_ctl_async((uint8_t)cid, (uint8_t)type) != 0)
+        {
+            atReply(atHandle, AT_RC_CME_ERROR, CME_ERR_NOT_ALLOWED, NULL);
+        }
+        else
+        {
+            atReply(atHandle, AT_RC_OK, AT_SUCCESS_CODE, NULL);
+        }
+    }
+    else if (g_req_type == AT_CMD_TEST)
+    {
+        char respBuff[AT_RESP_ARRAY_128_LEN] = {0};
+        snprintf(respBuff, sizeof(respBuff), "+QNETDEVCTL: (0,1,3),(%d-%d),(0,1)", CID_MIN_VAL, CID_MAX_VAL);
+        atReply(atHandle, AT_RC_OK, AT_SUCCESS_CODE, respBuff);
+    }
+    else if (g_req_type == AT_CMD_QUERY)
+    {
+        char respBuff[AT_RESP_ARRAY_128_LEN] = {0};
+        if (g_app_basic_cfg->usb_cid == INVAILD_CID_FLAG)
+        {
+            snprintf(respBuff, sizeof(respBuff), "+QNETDEVCTL: 0,0,0,0");
+        }
+        else
+        {
+            snprintf(respBuff, sizeof(respBuff), "+QNETDEVCTL: %d,%d,%d,%d",
+                     ((g_softap_fac_nv->gw_act_mode == 1) ? 3 : 1),
+                     g_app_basic_cfg->usb_cid,
+                     g_app_basic_cfg->usbnet_sta_urc,
+                     usbNetDevWanIsOk());
+        }
+        atReply(atHandle, AT_RC_OK, AT_SUCCESS_CODE, respBuff);
+    }
+    else
+    {
+        atReply(atHandle, AT_RC_CME_ERROR, CME_ERR_NOT_ALLOWED, NULL);
+    }
+
     return AT_END;
 }
 
@@ -228,7 +357,7 @@ struct at_serv_proc_e at_basic_req[] = {
      * the real device belong to components not compiled in (lowpower/lbs),
      * not registered for now */
     {"+XYACT",      at_XYACT_req},
-    {"+QNETDEVCTL", at_stub_ok},
+    {"+QNETDEVCTL", at_QNETDEVCTL_req},
     {"+NV",         at_NV_req},
     {"+QIDNSCFG",   at_QIDNSCFG_req},
     {"+QIDNSGIP",   at_QIDNSGIP_req},

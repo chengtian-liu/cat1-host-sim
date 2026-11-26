@@ -96,6 +96,13 @@ void *usbnetMemoryAllocAlign(size_t size, osMemAlign_t align)
     return pvPortMalloc(size);
 }
 
+size_t usbMemoryAllocatedSize(void)
+{
+    /* Single heap_4 heap without per-applicant accounting; report 0 so
+     * usbNetFreeCntGet() sees maximum free receive blocks. */
+    return 0;
+}
+
 size_t xPortGetFreeHeapSize_Hard(void)
 {
     return xPortGetFreeHeapSize();
@@ -484,20 +491,6 @@ bool xy_get_cid_vaild(unsigned char cid)
 void net_tools_init(void)               /* real device: netpkt/src/xy_net_tools.c */
 {
     LOGI("SIMNET", "net_tools_init - no-op on host");
-}
-
-/* ================================================================== */
-/* Gateway netif getter (real device: netpkt/src/gw_netif_api.c,       */
-/* USB/RNDIS gateway port)                                             */
-/* Only host reference: socketMgrApi.c sockMgrBindGwNetif (called      */
-/* only in the RNDIS debug mode where g_softap_fac_nv->xytest==8,      */
-/* never triggered on host). The host has no gateway netif; always     */
-/* returns NULL.                                                       */
-/* ================================================================== */
-
-struct netif *gwEthNetifGet(void)
-{
-    return NULL;
 }
 
 /* ================================================================== */

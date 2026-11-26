@@ -182,6 +182,7 @@ target_compile_definitions(xyat PUBLIC
     LPUART_AT=1
     UART_AT=1
     USB_DEVICE=1
+    USB_ECM=1
     USB_AT=1
     USB_LOG=1
     CSP_LOG=1
@@ -221,6 +222,7 @@ target_compile_definitions(xyat PUBLIC
     XY_PPP=1
     SIM_PPP_AUTH=${ENABLE_SIM_PPP_AUTH}
     CONFIG_RADVD=1
+    DHCP_SERVER=1
     DHCP6_SERVER=1
     AT_FS_QUEC=${ENABLE_AT_FS_QUEC}
     LFS_THREADSAFE=0
@@ -357,8 +359,10 @@ add_library(xynet STATIC
     ${SDK_ROOT}/platform/application/netdata/netpkt/src/net_mem.c
     ${SDK_ROOT}/platform/application/netdata/netpkt/src/pkt_process.c
     ${SDK_ROOT}/platform/application/netdata/netpkt/src/fast_process.c
-    # --- radvd / dhcpv6 ---
+    ${SDK_ROOT}/platform/application/netdata/netpkt/src/gw_netif_api.c
+    # --- radvd / dhcp / dhcpv6 ---
     ${SDK_ROOT}/platform/application/netdata/radvd/radvd_reply.c
+    ${SDK_ROOT}/platform/application/netdata/dhcpd/dhcp_server.c
     ${SDK_ROOT}/platform/application/netdata/dhcpv6/dhcp6_reply.c
     # --- PPP server ---
     ${SDK_ROOT}/platform/application/ppp/src/ppp_server.c
@@ -379,6 +383,7 @@ add_library(xynet STATIC
     ${SDK_ROOT}/platform/application/common/src/main_proxy.c
     # --- Network-side stubs (common to the SDK family) ---
     ${SIM_SDK_COMMON}/src/sim_net_shims.c
+    ${SIM_SDK_COMMON}/src/sim_tap_net.c
     ${SIM_SDK_COMMON}/src/sim_icc_shim.c
 )
 
@@ -477,6 +482,7 @@ target_include_directories(xynet PUBLIC
     ${SDK_ROOT}/platform/application/network/lwip/nat/inc
     ${SDK_ROOT}/platform/application/netdata/netpkt/inc
     ${SDK_ROOT}/platform/application/netdata/radvd
+    ${SDK_ROOT}/platform/application/netdata/dhcpd
     ${SDK_ROOT}/platform/application/netdata/dhcpv6
     ${SDK_ROOT}/platform/application/ppp/inc
     ${SDK_ROOT}/platform/application/common/inc
@@ -542,7 +548,7 @@ target_compile_options(xynet PRIVATE -Wno-unused-parameter -fno-strict-aliasing 
 # external definition, so both configurations are correct
 target_compile_options(xynet PRIVATE -fgnu89-inline)
 target_compile_options(xynet PRIVATE -include ${SIM_SDK_COMMON}/include/sim_missing_decls.h)
-target_link_libraries(xynet PUBLIC xyat xyos xymbed ws2_32 iphlpapi)
+target_link_libraries(xynet PUBLIC xyat xyos xymbed ws2_32 iphlpapi advapi32)
 
 # ---------------------------------------------------------------------------
 # simcommon -- SDK-family common host stubs (the chip-independent part of the former xy4101shim)

@@ -46,6 +46,12 @@ void vPortMemCacheInvalid(void *addr);
 void *netMemoryAllocAlignWithRetaddr(size_t size);
 void *usbnetMemoryAllocAlign(size_t size, unsigned int align);
 
+/* USB heap applicant byte-usage queries (real device: macro expansion to
+ * xPortGetAllocatedSize(eHeapApplicant_USB) under heap_10/WITH_RECORD; the
+ * simulator uses a single heap_4 heap without per-applicant accounting).
+ * usbNetFreeCntGet() only needs a value below USB_RECV_MEM_USED_MAX. */
+size_t usbMemoryAllocatedSize(void);
+
 /* Free function of net_mem.c (used by the sim_proxy_uplink callback in
  * sim_net_shims.c) */
 void net_free(void *pMem);

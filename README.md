@@ -11,7 +11,7 @@ The module SDK source (RTOS kernel / AT framework / lwIP stack / application cod
 
 > **SDK required to build.** This project is the host simulation *shell* around the SDK; it **does not contain or ship the SDK source**. Building requires the matching LTE Cat.1 module SDK (AP-side source tree) on the local machine; without it `xysim.exe` cannot be compiled — this README can still be read as an architecture reference. To obtain the SDK, contact Xinyi Information Technology sales/technical support.
 
-**Contents:** [Features](#features) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Architecture](#architecture-three-layer-directory-layout) · [Build](#build) · [Running & Self-Test](#running-and-self-test) · [gdb Debugging](#gdb-single-step-debugging) · [Serial Tool Testing](#serial-tool-testing-virtual-serial-port-pair) · [Verified AT Commands](#verified-at-commands-excerpt) · [New Chip Target](#adding-a-new-chip-product) · [Toolchain Appendix](#appendix-toolchain-setup-notes) · [License](#license)
+**Contents:** [Features](#features) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Architecture](#architecture-three-layer-directory-layout) · [Build](#build) · [Running & Self-Test](#running-and-self-test) · [gdb Debugging](#gdb-single-step-debugging) · [Serial Tool Testing](#serial-tool-testing-virtual-serial-port-pair) · [USB NIC Dial-up](#usb-nic-dial-up-tap-adapter) · [Verified AT Commands](#verified-at-commands-excerpt) · [New Chip Target](#adding-a-new-chip-product) · [Toolchain Appendix](#appendix-toolchain-setup-notes) · [License](#license)
 
 ## Features
 
@@ -22,6 +22,7 @@ The module SDK source (RTOS kernel / AT framework / lwIP stack / application cod
 | **Fake CP — "on network" at boot** | Commands missing from the AP command table are forwarded to the virtual PS and answered by a simulated CP (`sim_vps_net`): CPIN READY / CREG 0,1 / CSQ 31,99; **cid=1 PDP auto-activates at boot** (equivalent to `AT+CGACT=1`) |
 | **Real internet, zero setup** | In-process user-space NAT proxy (TCP / UDP five-tuple relay / ICMP ping / DNS discovery) exits via ordinary host sockets — **no ICS, no drivers, no administrator** |
 | **Virtual serial ports** | AT / MODEM (PPP dial-up) / LPUART channels each map to a VSPE or com0com pair; Windows modem dialing supported |
+| **USB NIC (ECM/RNDIS) dial-up** | `AT+QNETDEVCTL` brings up a real Ethernet NIC on the host (TAP-Windows adapter `SimRNDIS`); the SDK gateway netif + DHCP server run unmodified — host apps use the module as their network card |
 | **gdb single-step debugging** | Debug build (-g, no optimization); live FreeRTOS task-table inspection via `vTaskList` |
 | **pcap capture & log shim** | `--pcap` taps uplink/downlink IP packets; `xy_printf` / `user_printf` land on the plain-text colored console — no Logview tool needed |
 | **Multi-chip architecture** | Three-layer design (generic core + SDK common + chip target); a new product is just a new `target-xxx/` directory |
@@ -36,6 +37,7 @@ The module SDK source (RTOS kernel / AT framework / lwIP stack / application cod
 | CP core (3GPP / RF stack) | Real baseband | 🔁 Fake CP (`sim_vps_net`) — not simulated |
 | Data egress to network | Via CP core | 🔁 User-space proxy → host sockets |
 | Serial / USB ports | Hardware | 🔁 VSPE / com0com virtual serial pairs |
+| USB NIC class driver (ECM/RNDIS) | USBX device class on chip | 🔁 TAP-Windows adapter `SimRNDIS` (`sim_tap_net.c`) |
 | Flash | Hardware | 🔁 Disk image (littlefs backend) |
 | Registers / RF / RTC | Hardware | 🔁 Shim layer |
 
@@ -145,6 +147,47 @@ Full build options: [Build](#build). Running with virtual serial ports: [Running
 > **Wedge point 1**: the real-device egress toward the CP core; the simulation replaces it with `sim_proxy_uplink()`, which goes out to the public internet via host sockets.
 > **Wedge point 2**: after the host receives packets, they are injected back into the SDK downlink through the cross-core data channel shim and travel the real-device PPP HDLC encoding → AT channel path back to the terminal, transparent to the PPP terminal.
 
+### USB NIC (ECM/RNDIS) Gateway and Data Plane
+
+```text
+┌────────────────────────────────────────────────────────┐
+│  Host applications (browser / ping / any socket app)   │ ←── SimRNDIS shows up as a
+│  Windows TCP/IP stack on the "SimRNDIS" Ethernet NIC   │     plain Ethernet adapter;
+│                                                        │     address via DHCP served
+│                                                        │     by the SDK (unmodified)
+└───────────┬─────────────────────────────┬──────────────┘
+            │ Uplink: Ethernet frames     │ Downlink: Ethernet frames
+            ▼                             ▲
+┌───────────────────────┐   ┌────────────────────────────┐
+│ TAP read thread →     │   │ sim_tap_net.c downlink     │
+│ RTOS rx task →        │   │ → TAP write                │
+│ SDK USB NIC ingress → │   │ (replaces the USB          │
+│ fast-path forwarding  │   │  ECM/RNDIS class driver)   │
+│ (inside the SDK; the  │   │                            │
+│  simulation does not  │   │                            │
+│  interfere)           │   │                            │
+└───────────┬───────────┘   └─────────────▲──────────────┘
+            ▼                             │
+┌───────────────────────┐   ┌────────────────────────────┐
+│ Wedge point 1 — SDK   │   │ SDK gateway netif          │
+│ AP→CP data egress,    │   │ (unmodified) →             │
+│ replaced by the shim  │   │ USB NIC egress             │
+│ (sim_net_shims.c)     │   │                            │
+└───────────┬───────────┘   └─────────────▲──────────────┘
+            ▼                             │
+┌───────────────────────┐   ┌────────────────────────────┐
+│ sim_proxy_uplink()    │   │ sim_proxy downlink ring    │
+│ → host socket         │   │ buffer → proxy_rx task     │
+└───────────┬───────────┘   └─────────────▲──────────────┘
+            ▼                             │
+┌────────────────────────────────────────────────────────┐
+│               Internet (via host sockets)              │
+└────────────────────────────────────────────────────────┘
+```
+
+> **Replacement point**: only the USB ECM/RNDIS class driver is replaced — `sim_tap_net.c` exposes the host side as a TAP-Windows Adapter V9 named `SimRNDIS`. The gateway netif, DHCP server and forwarding logic above it are stock SDK code; below, traffic joins the same wedge point 1/2 → `sim_proxy` egress as the PPP path.
+> **Link state**: `AT+QNETDEVCTL` dial-up / teardown toggles the TAP media status along with the gateway link, so the host NIC's cable state tracks PDP up/down — same as plugging/unplugging the real module's USB.
+
 ## Architecture (Three-Layer Directory Layout)
 
 ```text
@@ -163,7 +206,7 @@ cat1-host-sim/
  │   │                      #   + common shim lib simcommon (incl. generic startup skeleton sim_main)
  │   ├─ include/            #   override headers: FreeRTOSConfig.h / sim_main.h (hook table) /
  │   │                      #   sim_xylog.h (log shim) / sim_vps_net.h (fake CP) /
- │   │                      #   sim_tty_device.h / sim_pcap.h / memmap.h / ...
+ │   │                      #   sim_tty_device.h / sim_tap_net.h (USB NIC) / sim_pcap.h / memmap.h / ...
  │   ├─ include_host/       #   host-only overrides: hw_types.h (shadow registers) /
  │   │                      #   usb_api.h / at_cmd_regist_decl.h / lwip/inet.h / ...
  │   ├─ lwipopts.h          #   simulator-modified (shadows the stock SDK lwIP config)
@@ -171,6 +214,7 @@ cat1-host-sim/
  │                          #   sim_vps_net.c (fake CP) / sim_shims.c / sim_flash.c /
  │                          #   sim_rtc_shims.c / sim_tty_device.c / sim_pcap.c /
  │                          #   sim_icc_shim.c / sim_net_shims.c / sim_at_shims.c /
+ │                          #   sim_tap_net.c (TAP USB NIC) /
  │                          #   sim_at_cmd_regist.c / sim_factory_nv.c / sim_sys_arch.c
  │
  ├─ target-xy4101/          # layer 3: chip-specific (copy this dir for new products)
@@ -257,7 +301,7 @@ The three channels can work simultaneously, each on its own independent virtual 
 
 Two notes:
 
-1. **No administrator needed**: the data plane is an in-process user-space proxy (sim_proxy) — no UAC prompt, no driver install, no ICS setup; it runs directly as an ordinary user;
+1. **No administrator needed to run**: the data plane is an in-process user-space proxy (sim_proxy) — no UAC prompt, no ICS setup; it runs directly as an ordinary user. (The optional USB NIC feature needs a one-time, administrator-assisted TAP driver install — see [USB NIC Dial-up](#usb-nic-dial-up-tap-adapter); everything else works without it.)
 2. **Auto PDP activation at boot**, no need to type `AT+CGACT=1` by hand; as long as the host itself has working internet, simulator traffic gets real public-network access (sim_proxy auto-discovers the host DNS).
 
 Console self-test (type after running with no arguments):
@@ -353,6 +397,39 @@ The virtual serial port tool can be **VSPE** or **com0com** (both free). Either 
 3. Create the virtual serial port pair from the command line: `setupc.exe install PortName=COM20 PortName=COM21`;
 4. Usage from here is the same as VSPE.
 
+## USB NIC Dial-up (TAP Adapter)
+
+Besides PPP dial-up, the module's second data-channel form — the **USB network card (ECM/RNDIS)** — is also simulated: the host gets a real Ethernet adapter named `SimRNDIS`, and ordinary host applications (browser, ping, any socket program) can use the module as their network card after `AT+QNETDEVCTL` dial-up. Data path and semantics: see [USB NIC Gateway and Data Plane](#usb-nic-ecmrndis-gateway-and-data-plane).
+
+**One-time setup** (administrator needed only here; running the simulator itself still needs no administrator):
+
+1. Install the **TAP-Windows Adapter V9** driver (ships with OpenVPN; the tool expects it at `C:\Program Files\TAP-Windows`);
+2. Create the NIC with the bundled helper (auto-requests UAC elevation):
+
+```bat
+python tools\tap_adapter.py create        :: creates "SimRNDIS", keeps DHCP (recommended)
+python tools\tap_adapter.py list          :: inspect adapters / link state
+python tools\tap_adapter.py remove        :: remove SimRNDIS
+```
+
+The simulator only opens the adapter whose connection name is exactly **`SimRNDIS`**; foreign tap0901 adapters (e.g. OpenVPN's) are deliberately never grabbed. If none is found at boot, it logs an error and continues — the AT / PPP paths are unaffected. A freshly created NIC showing "media disconnected" is normal: the link comes UP when the simulator opens it.
+
+**Dial-up self-test** (AT console or `--at-com`):
+
+```text
+AT+QNETDEVCTL=1,1     -> OK       (connect once; cid=1 is auto-activated at boot)
+AT+QNETDEVCTL?        -> +QNETDEVCTL: 1,1,0,1
+ipconfig              -> SimRNDIS got 192.168.0.100, gateway 192.168.0.1 (SDK DHCP server, pool .100-.254)
+ping 223.5.5.5        -> replies via the module data plane (sim_proxy → host sockets)
+AT+QNETDEVCTL=0,1     -> OK       (disconnect; SimRNDIS link goes down)
+```
+
+Notes:
+
+- `type=1` connects once (CID must be activated; not persisted); `type=3` auto-activates and persists across restart; `type=0` disconnects; optional third parameter enables the state URC;
+- Keep `SimRNDIS` on DHCP — the SDK serves the address;
+- `--pcap` captures USB NIC traffic too; egress goes through sim_proxy — **no ICS / network sharing setup needed**.
+
 ## Verified AT Commands (Excerpt)
 
 | Category | Commands |
@@ -361,6 +438,7 @@ The virtual serial port tool can be **VSPE** or **com0com** (both free). Either 
 | SIM/signal | CPIN? / CIMI / CSQ / COPS? |
 | Network registration | CREG / CEREG / CGREG (read + set) |
 | PDP | CGATT / CGDCONT / CGACT / CGPADDR / CGCONTRDP |
+| USB NIC dial-up | QNETDEVCTL (set / read / test; type=0/1/3, URC enable) |
 | Data plane | ping / full plaintext socket chain / NTP / CCLK etc. (macro alignment compiled in) |
 | Application protocols | HTTP / FTP / MQTT (same implementation as the real device) |
 | Security | Full SSL/TLS chain (mbedtls + stock SDK TLS AT commands, same list as the real device) |
@@ -402,4 +480,4 @@ Switch the build with `cmake -DSIM_TARGET=target-xxx`. sim-core and sim-sdk-comm
 
 MIT — see [LICENSE](LICENSE).
 
-> **Statement**: this project is designed, developed and maintained by Chengtian Liu; copyright is jointly owned by Chengtian Liu and Xinyi Information Technology Co., Ltd., under the MIT license. The module SDK copyright belongs to Xinyi Information Technology; this repository contains and distributes no SDK source. A few individual files such as `sim-sdk-common/lwipopts.h` retain the original SDK copyright notice, and `third_party/FreeRTOS-Kernel` is the official MIT-licensed FreeRTOS Windows port.
+> **Statement**: this project is designed, developed and maintained by Chengtian Liu; copyright belongs to Chengtian Liu, under the MIT license. The module SDK copyright belongs to Xinyi Information Technology; this repository contains and distributes no SDK source. A few individual files such as `sim-sdk-common/lwipopts.h` retain the original SDK copyright notice, and `third_party/FreeRTOS-Kernel` is the official MIT-licensed FreeRTOS Windows port.

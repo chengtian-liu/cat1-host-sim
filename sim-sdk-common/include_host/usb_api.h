@@ -45,6 +45,28 @@ bool UsbUnregistStateCallback(int usb_state, usb_state_change_func_t change_func
 bool isUsbAtSupported(void);
 bool isUsbModemAtSupported(void);
 
+/* USB network status (matches the real-device usb_network_status enum) */
+typedef enum
+{
+    USB_NETWORK_DISCONNECT = 0,
+    USB_NETWORK_CONNECT,
+    USB_NETWORK_MAX_NUM
+} usb_network_status;
+
+/*
+ * USB network data-plane APIs (real device: usbx/usb_api/inc/usb_api.h,
+ * implemented by the USBX device-class driver). The host replaces the USB
+ * bulk-IN/OUT pipes with a TAP NIC; implementations live in the TAP shim.
+ * Prototypes use plain C types so this header keeps avoiding ux_api.h.
+ */
+unsigned int ux_network_state(void);
+unsigned int ux_network_send(void *buffer, unsigned long count);
+unsigned int ux_network_free(void *buffer);
+void ux_network_group_size_set(unsigned char group_size);
+usb_network_status get_usb_network_status(void);
+void usb_gw_process_active(void);
+void usb_gw_process_deactive(void);
+
 #ifdef __cplusplus
 }
 #endif

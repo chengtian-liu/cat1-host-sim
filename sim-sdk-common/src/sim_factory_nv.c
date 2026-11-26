@@ -92,7 +92,6 @@ softap_fac_nv_t sim_fac_nv = {
     .csp_log_tx           = 255,
     .csp_log_rx           = 255,
     .debug_log_tx         = 255,
-    .gnss_baudrate        = 48,
     .sim0_det             = 255,
     .sim1_det             = 255,
     .sim1_vcc             = 255,

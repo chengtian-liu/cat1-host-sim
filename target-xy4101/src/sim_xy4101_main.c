@@ -37,6 +37,7 @@
 #include "sim_vps_net.h"
 #include "sim_pcap.h"
 #include "sim_main.h"
+#include "sim_tap_net.h"
 #include "sim_xy4101_bridge.h"
 
 /* Real-device entry points (original SDK, unmodified):
@@ -153,6 +154,14 @@ static void sim_boot_task(void *arg)
      * device, called explicitly on the host) */
     xy_printf(PLATFORM_AP, INFO_LOG, "[SIMBOOT] net_init (lwip/tcpip + WAN netif) ...");
     net_init();
+
+    /* USB ECM/RNDIS gateway path: open the TAP-Windows Adapter V9 named
+     * "SimRNDIS" and start the uplink/downlink transceiver threads. This
+     * replaces the USBX class drivers (ux_device_cdc_ecm.c/ux_device_rndis.c)
+     * that are not compiled into the simulator. No-op + error log if no TAP
+     * device is present, so the existing PPP/AT paths keep working. */
+    xy_printf(PLATFORM_AP, INFO_LOG, "[SIMBOOT] sim_tap_net_start (TAP NIC) ...");
+    sim_tap_net_start();
 
     /* Application-layer socket/SSL/FTP registration (on the real device
      * app_start walks .appRegTable and schedules it at the LOW priority

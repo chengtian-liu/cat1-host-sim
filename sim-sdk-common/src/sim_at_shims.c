@@ -102,6 +102,15 @@ uint8_t is_sleep_locked(Lock_Type_E sleep_type)
     return 0;
 }
 
+/* DTR sleep-lock state (real device: kernel/misc/src/dtr_pin.c:75; the
+ * !DTR_PIN build returns 0 there too). Since SDK ae222a971a (2026-11-25)
+ * at_response.c:isUrcNeedRing calls it to skip RI when the MCU holds DTR.
+ * Host has no DTR pin: never locked. */
+int dtrSleepLockStateGet(void)
+{
+    return 0;
+}
+
 void sys_lock(Lock_Type_E type)
 {
     (void)type;
